@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Jarvis Web</title>
+  <style>
+    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #121212; color: #e6e6e6; }
+    .page { max-width: 720px; margin: 0 auto; padding: 24px; }
+    h1 { margin-bottom: 0.25rem; }
+    .card { background: #1f1f1f; border: 1px solid #2e2e2e; border-radius: 16px; padding: 18px; margin-bottom: 18px; }
+    input, button, textarea { width: 100%; border-radius: 12px; border: 1px solid #333; background: #141414; color: #eee; padding: 12px; font: inherit; }
+    button { cursor: pointer; background: #4a91ff; border-color: #3c7ae8; color: #fff; margin-top: 8px; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .list-item { padding: 10px 0; border-bottom: 1px solid #2a2a2a; }
+    .list-item:last-child { border-bottom: none; }
+    .list-actions { display: flex; gap: 8px; margin-top: 8px; }
+    .list-actions button { width: auto; padding: 8px 12px; background: #ff5f5f; border-color: #e64949; }
+    .small { font-size: 0.92rem; color: #9aa0ab; }
+    pre { overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+    #voice-chat { margin-top: 16px; max-height: 280px; overflow-y: auto; }
+    .chat-message { padding: 10px; border-radius: 12px; margin-bottom: 10px; }
+    .chat-message.you { background: #24315f; }
+    .chat-message.jarvis { background: #2d5a2d; }
+    .chat-message strong { display: block; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Jarvis Web</h1>
+    <p class="small">Use this app from any device on your local network. Add todos, notes, and search your workspace.</p>
+
+    <div class="card">
+      <h2>Todos</h2>
+      <form id="todo-form">
+        <input id="todo-input" placeholder="Add a new task" autocomplete="off" />
+        <button type="submit">Add Todo</button>
+      </form>
+      <div id="todo-list"></div>
+    </div>
+
+    <div class="card">
+      <h2>Notes</h2>
+      <form id="note-form">
+        <textarea id="note-input" rows="3" placeholder="Write a quick note"></textarea>
+        <button type="submit">Save Note</button>
+      </form>
+      <div id="note-list"></div>
+    </div>
+
+    <div class="card">
+      <h2>Workspace Search</h2>
+      <form id="search-form">
+        <input id="search-input" placeholder="Search workspace files" autocomplete="off" />
+        <button type="submit">Search</button>
+      </form>
+      <div id="search-results"></div>
+    </div>
+
+    <div class="card">
+      <h2>Voice Jarvis</h2>
+      <button id="voice-button">Start Listening</button>
+      <p class="small" id="voice-hint">Tap to speak a command.</p>
+      <div id="voice-chat"></div>
+    </div>
+
+    <div class="card">
+      <h2>Status</h2>
+      <pre id="status-output">Loading...</pre>
+    </div>
+  </div>
+
+  <script>
+    const api = (path, options = {}) => fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    }).then(async res => {
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw body || { error: 'Request failed' };
+      return body;
+    });
+
+    const todoList = document.getElementById('todo-list');
+    const noteList = document.getElementById('note-list');
+    const searchResults = document.getElementById('search-results');
+    const statusOutput = document.getElementById('status-output');
+
+    const renderList = (container, items, renderItem) => {
+      container.innerHTML = items.length ? items.map(renderItem).join('') : '<p class="small">No items yet.</p>';
+    };
+
+    const loadTodos = async () => {
+      const todos = await api('/api/todos');
+      renderList(todoList, todos, item => `
+        <div class="list-item">
+          <strong>${item.id}.</strong> ${item.task}
+          <div class="list-actions"><button data-id="${item.id}">Delete</button></div>
+        </div>
+      `);
+    };
+
+    const loadNotes = async () => {
+      const notes = await api('/api/notes');
+      renderList(noteList, notes, item => `
+        <div class="list-item"><strong>${item.id}.</strong> ${item.text}</div>
+      `);
+    };
+
+    const loadStatus = async () => {
+      const status = await api('/api/status');
+      statusOutput.textContent = JSON.stringify(status, null, 2);
+    };
+
+    const setStatus = text => { statusOutput.textContent = text; };
+
+    document.getElementById('todo-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const input = document.getElementById('todo-input');
+      const task = input.value.trim();
+      if (!task) return;
+      input.disabled = true;
+      setStatus('Saving todo...');
+      try {
+        await api('/api/todos', { method: 'POST', body: JSON.stringify({ task }) });
+        input.value = '';
+        await loadTodos();
+        setStatus('Todo saved.');
+      } catch (error) {
+        setStatus(error.error || 'Unable to save todo.');
+      } finally {
+        input.disabled = false;
+      }
+    });
+
+    document.getElementById('note-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const input = document.getElementById('note-input');
+      const text = input.value.trim();
+      if (!text) return;
+      input.disabled = true;
+      setStatus('Saving note...');
+      try {
+        await api('/api/notes', { method: 'POST', body: JSON.stringify({ text }) });
+        input.value = '';
+        await loadNotes();
+        setStatus('Note saved.');
+      } catch (error) {
+        setStatus(error.error || 'Unable to save note.');
+      } finally {
+        input.disabled = false;
+      }
+    });
+
+    document.getElementById('search-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const input = document.getElementById('search-input');
+      const query = input.value.trim();
+      if (!query) return;
+      input.disabled = true;
+      setStatus('Searching...');
+      try {
+        const result = await api('/api/search', { method: 'POST', body: JSON.stringify({ query }) });
+        renderList(searchResults, result.results, item => `
+          <div class="list-item">
+            <div><strong>${item.file}:${item.line}</strong></div>
+            <div>${item.text}</div>
+          </div>
+        `);
+        setStatus(`Found ${result.results.length} matches.`);
+      } catch (error) {
+        setStatus(error.error || 'Search failed.');
+      } finally {
+        input.disabled = false;
+      }
+    });
+
+    todoList.addEventListener('click', async event => {
+      const button = event.target.closest('button[data-id]');
+      if (!button) return;
+      const id = button.dataset.id;
+      button.disabled = true;
+      setStatus('Deleting todo...');
+      try {
+        await api(`/api/todos/${id}`, { method: 'DELETE' });
+        await loadTodos();
+        setStatus('Todo deleted.');
+      } catch (error) {
+        setStatus(error.error || 'Unable to delete todo.');
+      }
+    });
+
+    const initialize = async () => {
+      await loadTodos();
+      await loadNotes();
+      await loadStatus();
+    };
+
+    const addChatMessage = (speaker, text) => {
+      const entry = document.createElement('div');
+      entry.className = `chat-message ${speaker.toLowerCase()}`;
+      entry.innerHTML = `<strong>${speaker}:</strong> ${text}`;
+      voiceChat.appendChild(entry);
+      voiceChat.scrollTop = voiceChat.scrollHeight;
+    };
+
+    const speakText = text => {
+      if (!('speechSynthesis' in window)) return;
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'en-US';
+      window.speechSynthesis.speak(utterance);
+    };
+
+    const sendVoiceCommand = async command => {
+      addChatMessage('You', command);
+      setStatus('Processing voice command...');
+      try {
+        const result = await api('/api/command', { method: 'POST', body: JSON.stringify({ command }) });
+        addChatMessage('Jarvis', result.message || 'Done.');
+        speakText(result.message || 'Done.');
+        if (result.todos) await loadTodos();
+        if (result.notes) await loadNotes();
+        if (result.results) {
+          renderList(searchResults, result.results, item => `
+            <div class="list-item">
+              <div><strong>${item.file}:${item.line}</strong></div>
+              <div>${item.text}</div>
+            </div>
+          `);
+        }
+        setStatus(result.message || 'Command completed.');
+      } catch (error) {
+        setStatus(error.error || 'Voice command failed.');
+      }
+    };
+
+    const recognition = window.SpeechRecognition || window.webkitSpeechRecognition ? new (window.SpeechRecognition || window.webkitSpeechRecognition)() : null;
+    let listening = false;
+    if (recognition) {
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+      recognition.onresult = event => {
+        const transcript = event.results[0][0].transcript.trim();
+        if (transcript) sendVoiceCommand(transcript);
+      };
+      recognition.onerror = event => {
+        setStatus('Voice recognition error: ' + event.error);
+      };
+      recognition.onend = () => {
+        listening = false;
+        voiceButton.textContent = 'Start Listening';
+        voiceHint.textContent = 'Tap to speak a command.';
+      };
+    }
+
+    const voiceButton = document.getElementById('voice-button');
+    const voiceHint = document.getElementById('voice-hint');
+    const voiceChat = document.getElementById('voice-chat');
+
+    voiceButton.addEventListener('click', () => {
+      if (!recognition) {
+        setStatus('Voice recognition is not supported in this browser.');
+        return;
+      }
+      if (listening) {
+        recognition.stop();
+      } else {
+        listening = true;
+        voiceButton.textContent = 'Stop Listening';
+        voiceHint.textContent = 'Listening...';
+        recognition.start();
+      }
+    });
+
+    initialize().catch(err => { setStatus('Unable to load data.'); console.error(err); });
+  </script>
+</body>
+</html>
